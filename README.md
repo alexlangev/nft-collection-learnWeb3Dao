@@ -1,38 +1,109 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+This project is from [lw3](https://learnweb3.io/courses/c1d7081b-63a9-4c6e-b35c-9fcbbad418b2/lessons/7411199b-6463-4ffa-803d-80afa30585ec)
 
-## Getting Started
+The associated smart contract is deployed on the Sepolia testnet at: [0x9A1eA39E30025fC237beF60666968844f8E31968](https://sepolia.etherscan.io/address/0x9A1eA39E30025fC237beF60666968844f8E31968)
 
-First, run the development server:
+Here are the smart contracts:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
+```solidity
+//SPDX-License-Identifier: MIT
+pragma solidity ^0.8.4;
+
+interface IWhitelist {
+  // Getter function automatically generated from the publig mapping in the original contract.
+  function whitelistedAddresses(address) external view returns (bool);
+}
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.4;
 
-You can start editing the page by modifying `pages/index.js`. The page auto-updates as you edit the file.
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "./IWhitelist.sol";
 
-[API routes](https://nextjs.org/docs/api-routes/introduction) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.js`.
+contract CryptoDevs is ERC721Enumerable, Ownable {
+  // If set, the token will be a concatenation of 'baseURI' and 'tokenId'
+  string _baseTokenURI;
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/api-routes/introduction) instead of React pages.
+  // price of one Crypto Dev NFT
+  uint256 public _price = 0.01 ether;
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+  // Used to paude the contract if needed for emergency cases.
+  bool public _paused;
 
-## Learn More
+  // the maximum number of cryptodevs
+  uint256 maxTokenIds = 20;
 
-To learn more about Next.js, take a look at the following resources:
+  // total number of minted
+  uint256 public tokenIds;
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+  // Whitelist contract instance
+  IWhitelist whitelist;
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+  // bool to keep track of wether presale started or not
+  bool public presaleStarted;
 
-## Deploy on Vercel
+  // timestamp for when presale would end
+  uint256 public presaleEnded;
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+  modifier onlyWhenNotPaused {
+    require(!_paused, "Contract is paused!");
+    _;
+  }
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+  // ERC 721's contructor takes two string arguments, name and symbol of the collection.
+  constructor (string memory baseURI, address whitelistContract) ERC721("Crypto Devs", "CD") {
+    _baseTokenURI = baseURI;
+    whitelist = IWhitelist(whitelistContract);
+  }
+
+  // onlyOwner modifier comes from the Ownable
+  function startPresale() public onlyOwner {
+    presaleStarted = true;
+    presaleEnded = block.timestamp + 5 minutes;
+  }
+
+  function presaleMint() public payable onlyWhenNotPaused {
+    require(presaleStarted && block.timestamp < presaleEnded, "Presale is not running");
+    require(whitelist.whitelistedAddresses(msg.sender), "you are not whitelisted");
+    require(tokenIds < maxTokenIds, "Exceeded maximum Crypto Devs supply");
+    require(msg.value >= _price, "Ether sent is not correct");
+    tokenIds += 1;
+    //_safeMint is a safer version of the _mint function as it ensures that
+    // if the address being minted to is a contract, then it knows how to deal with ERC721 tokens
+    // If the address being minted to is not a contract, it works the same way as _mint
+    _safeMint(msg.sender, tokenIds);
+  }
+
+  function mint() public payable onlyWhenNotPaused {
+    require(presaleStarted && block.timestamp >=  presaleEnded, "Presale has not ended yet");
+    require(tokenIds < maxTokenIds, "Exceeded maximum Crypto Devs supply");
+    require(presaleStarted && block.timestamp < presaleEnded, "Presale is not running");
+
+    tokenIds += 1;
+    _safeMint(msg.sender, tokenIds);
+  }
+
+  function _baseURI() internal view virtual override returns (string memory) {
+    return _baseTokenURI;
+  }
+
+  function setPaused(bool val) public onlyOwner {
+    _paused = val;
+  }
+
+  function withdraw() public onlyOwner {
+    address _owner = owner();
+    uint256 amount = address(this).balance;
+    (bool sent, ) = _owner.call{value: amount}("");
+    require(sent, "Failed to send Ether");
+  }
+
+    // Function to receive Ether. msg.data must be empty
+    receive() external payable {}
+
+    // Fallback function is called when msg.data is not empty
+    fallback() external payable {}
+}
+```
